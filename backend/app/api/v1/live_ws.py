@@ -19,13 +19,9 @@ async def get_live_telemetry(db: Session = Depends(get_db)):
     - Weather conditions and rail-temperature hazard levels
     - Real-time conflict matrix and block burst alerts
     """
-    # These data sources are independent; avoid making dashboard latency the
-    # sum of the external train/weather calls and conflict evaluation.
-    trains, weather, conflicts = await asyncio.gather(
-        LiveTrainService.get_corridor_train_feed(),
-        WeatherService.get_corridor_weather(),
-        LiveConflictMonitor.evaluate_conflicts(db),
-    )
+    trains = await LiveTrainService.get_corridor_train_feed()
+    weather = await WeatherService.get_corridor_weather()
+    conflicts = await LiveConflictMonitor.evaluate_conflicts(db)
 
     active_blocks_count = db.query(MaintenanceBlock).filter(
         MaintenanceBlock.status.in_(["APPROVED", "IN_PROGRESS"])
@@ -54,17 +50,12 @@ async def live_websocket_endpoint(websocket: WebSocket, db: Session = Depends(ge
     await ws_manager.connect(websocket)
     try:
         # Send immediate initial telemetry snapshot
-        trains, weather, conflicts = await asyncio.gather(
-            LiveTrainService.get_corridor_train_feed(),
-            WeatherService.get_corridor_weather(),
-            LiveConflictMonitor.evaluate_conflicts(db),
-        )
         initial_payload = {
             "event": "INITIAL_STATE",
             "timestamp": datetime.datetime.utcnow().isoformat(),
-            "trains": trains,
-            "weather": weather,
-            "conflicts": conflicts
+            "trains": await LiveTrainService.get_corridor_train_feed(),
+            "weather": await WeatherService.get_corridor_weather(),
+            "conflicts": await LiveConflictMonitor.evaluate_conflicts(db)
         }
         await websocket.send_json(initial_payload)
 
